@@ -1,0 +1,21 @@
+# secrets & credentials — never commit
+.env
+.env.*
+!.env.example
+
+# runtime artifacts (may contain screenshots / transient glogin codes)
+.mlxphone/
+results/
+logs/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# IDE / editor
+.idea/
+.vscode/

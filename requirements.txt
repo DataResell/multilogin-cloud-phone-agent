@@ -1,0 +1,5 @@
+requests>=2.31
+python-dotenv>=1.0
+# Pin urllib3<2 so macOS system Python (LibreSSL) doesn't emit NotOpenSSLWarning
+# on every invocation, which would pollute tool output agents parse.
+urllib3<2
