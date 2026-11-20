@@ -1,4 +1,4 @@
-"""Regression tests for the cold-start hardening.
+"""Regression tests for the cold-start hardening and the device tools.
 
 Runs with pytest (`python -m pytest`) or standalone (`python tests/test_hardening.py`).
 No network or device needed.
@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mlxphone import start_wait  # noqa: E402
+from mlxphone import start_wait, tools  # noqa: E402
 from mlxphone.errors import MlxError, MlxHTTPError  # noqa: E402
 from mlxphone.mlx_client import MlxClient  # noqa: E402
 
@@ -115,6 +117,129 @@ def test_signin_auto_retries_with_md5():
     c._post = fake_post
     tok = c.signin()
     assert tok == "TOK" and calls[0] == "pw" and calls[1] == hashlib.md5(b"pw").hexdigest()
+
+
+def test_endpoint_not_found_404_is_unavailable():
+    nested = MlxHTTPError("404", status_code=404, body={"status": {"error_code": "ENDPOINT_NOT_FOUND"}})
+    flat = MlxHTTPError("404", status_code=404, body={"error_code": "ENDPOINT_NOT_FOUND"})
+    assert nested.endpoint_unavailable and flat.endpoint_unavailable
+
+
+def test_other_404_is_not_unavailable():
+    assert not MlxHTTPError("404", status_code=404, body={"status": {"error_code": "PROFILE_NOT_FOUND"}}).endpoint_unavailable
+    assert not MlxHTTPError("404", status_code=404, body={}).endpoint_unavailable
+    assert not MlxHTTPError("404", status_code=404, body="oops").endpoint_unavailable
+
+
+def test_remaining_minutes_endpoint_not_found_is_unknown():
+    c = MlxClient(token="t")
+    err = MlxHTTPError("404", status_code=404, body={"status": {"error_code": "ENDPOINT_NOT_FOUND"}})
+    c.get_limit = lambda: (_ for _ in ()).throw(err)
+    assert c.remaining_minutes(log=lambda m: None) is None
+
+
+# ---- device tools (fake adb; no device needed) ---------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"fake-image"
+
+
+class _FakeDev:
+    def __init__(self, shell_out=None):
+        self.serial, self.adb_bin = "1.2.3.4:5555", "adb"
+        self.shell_calls = []
+        self.shell_out = shell_out or {}
+        self.glogins = 0
+
+    def glogin(self):
+        self.glogins += 1
+
+    def shell(self, *args, timeout=60):
+        self.shell_calls.append(args)
+        out = next((v for k, v in self.shell_out.items() if args[: len(k)] == k), "")
+        return SimpleNamespace(stdout=out, stderr="", returncode=0)
+
+
+def _patch_run(fake):
+    orig = tools.subprocess.run
+    tools.subprocess.run = fake
+    return orig
+
+
+def test_screenshot_stream_ok():
+    dev = _FakeDev()
+    orig = _patch_run(lambda cmd, **kw: SimpleNamespace(stdout=PNG, stderr=b"", returncode=0))
+    try:
+        assert tools._screencap(dev) == PNG
+        assert dev.glogins == 1 and not dev.shell_calls  # no fallback used
+    finally:
+        tools.subprocess.run = orig
+
+
+def test_screenshot_falls_back_to_pull_on_timeout():
+    dev = _FakeDev()
+
+    def fake_run(cmd, **kw):
+        if "exec-out" in cmd:
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        if "pull" in cmd:
+            Path(cmd[-1]).write_bytes(PNG)
+            return SimpleNamespace(stdout="1 file pulled", stderr="", returncode=0)
+        raise AssertionError(cmd)
+
+    orig = _patch_run(fake_run)
+    try:
+        assert tools._screencap(dev) == PNG
+        assert dev.shell_calls[0][:2] == ("screencap", "-p")
+        assert dev.shell_calls[-1][:2] == ("rm", "-f")  # phone copy cleaned up
+    finally:
+        tools.subprocess.run = orig
+
+
+def test_screenshot_falls_back_on_non_png():
+    dev = _FakeDev()
+
+    def fake_run(cmd, **kw):
+        if "exec-out" in cmd:
+            return SimpleNamespace(stdout=b"error: closed", stderr=b"", returncode=1)
+        Path(cmd[-1]).write_bytes(PNG)
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    orig = _patch_run(fake_run)
+    try:
+        assert tools._screencap(dev) == PNG
+    finally:
+        tools.subprocess.run = orig
+
+
+def test_launch_uses_resolved_activity():
+    dev = _FakeDev({("cmd", "package"): "priority=0\ncom.instagram.android/com.instagram.mainactivity.LauncherActivity\n"})
+    tools.cmd_launch(dev, ["com.instagram.android"])
+    assert ("am", "start", "-n", "com.instagram.android/com.instagram.mainactivity.LauncherActivity") in dev.shell_calls
+    assert not any(c[0] == "monkey" for c in dev.shell_calls)
+
+
+def test_launch_falls_back_to_monkey():
+    dev = _FakeDev({("cmd", "package"): "No activity found\n", ("monkey",): "Events injected: 1\n"})
+    tools.cmd_launch(dev, ["com.example.app"])
+    assert dev.shell_calls[-1][0] == "monkey"
+
+
+def test_launch_rejects_bad_package():
+    for bad in ([], ["not a package"], ["com.x; rm -rf /"], ["a", "b"]):
+        try:
+            tools.cmd_launch(_FakeDev(), bad)
+            assert False, f"expected MlxError for {bad}"
+        except MlxError:
+            pass
+
+
+def test_launch_not_installed_errors():
+    dev = _FakeDev({("cmd", "package"): "No activity found\n", ("monkey",): "** No activities found to run, monkey aborted.\n"})
+    try:
+        tools.cmd_launch(dev, ["com.missing.app"])
+        assert False, "expected MlxError"
+    except MlxError as e:
+        assert "com.missing.app" in str(e)
 
 
 if __name__ == "__main__":

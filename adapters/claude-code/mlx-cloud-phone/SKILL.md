@@ -17,7 +17,7 @@ then follow it. Nothing here reimplements the lifecycle.
 
 ## Do this
 1. **Start (deterministic):** `python -m mlxphone.session start --phone "$MOBILE_PROFILE_ID" --max-minutes 20`
-2. **Act (your loop):** for each step — `tools screenshot` → read it → `tools find <keyword>` for exact bounds → `tools tap <x> <y>` / `tools text "..."` → screenshot to verify. Re-find bounds after navigation.
+2. **Act (your loop):** open the app with `tools launch <package>`, then for each step — `tools screenshot` → read it → `tools find <keyword>` for exact bounds → `tools tap <x> <y>` / `tools text "..."` → screenshot to verify. Re-find bounds after navigation.
 3. **Always stop:** `python -m mlxphone.session stop --phone "$MOBILE_PROFILE_ID"` — on success or failure. (`--max-minutes` is a backstop, not a substitute.)
 
 ## Rules

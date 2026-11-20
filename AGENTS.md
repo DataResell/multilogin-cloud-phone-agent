@@ -57,6 +57,7 @@ python -m mlxphone.tools dump-ui results/ui.xml         # read the UI hierarchy
 python -m mlxphone.tools find <keyword>                 # locate nodes: text/desc/id + bounds
 python -m mlxphone.tools tap <x> <y>                    # ACT: tap real device pixels
 python -m mlxphone.tools text "hello world"            # type (spaces handled)
+python -m mlxphone.tools launch com.android.settings    # open an app by package name
 python -m mlxphone.tools shell <args...>                # any adb shell command
 ```
 
@@ -69,6 +70,9 @@ The loop for every meaningful step:
 
 Notes:
 - glogin auth is refreshed automatically before each tool call (the device session expires in ~30–60s).
+- Open apps with `launch <package>` rather than hand-built `shell am start` / `shell monkey` commands — it resolves the launcher activity for you and gives a clear error if the app isn't installed.
+- `screenshot` falls back to save-on-phone + `adb pull` automatically if streaming the image times out; just wait for it.
+- **Windows:** use `.venv\Scripts\python` in place of `python` in every command here (or activate the venv first).
 - For typing, avoid apostrophes, `&`, emoji, and shell/input control symbols; rephrase if needed. To clear a field: tap it, `shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A`, `shell input keyevent KEYCODE_DEL`, then type.
 
 ## Compliance (read before acting)

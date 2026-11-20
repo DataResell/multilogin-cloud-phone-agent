@@ -32,7 +32,7 @@ No credentials, handles, or persona details ship in this repo — fill your own.
 python -m mlxphone.session start --phone "$MOBILE_PROFILE_ID" --max-minutes 25
 
 # open X, then run the look → find → act → verify loop:
-python -m mlxphone.tools shell monkey -p com.twitter.android -c android.intent.category.LAUNCHER 1
+python -m mlxphone.tools launch com.twitter.android
 python -m mlxphone.tools screenshot results/x-home.png
 python -m mlxphone.tools find composer_write
 python -m mlxphone.tools tap <x> <y>

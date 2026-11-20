@@ -16,7 +16,7 @@ python -m mlxphone.session start --phone "$MOBILE_PROFILE_ID" --max-minutes 10
 
 python -m mlxphone.tools screenshot results/01-home.png
 # open Settings (package launch is simplest and robust):
-python -m mlxphone.tools shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1
+python -m mlxphone.tools launch com.android.settings
 python -m mlxphone.tools screenshot results/02-settings.png
 # verify by reading the UI:
 python -m mlxphone.tools find settings

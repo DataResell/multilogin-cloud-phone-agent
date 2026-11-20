@@ -63,6 +63,26 @@ the end (including on Ctrl-C).
 Without `make`: run `./scripts/setup.sh`, then
 `.venv/bin/python -m mlxphone.session {doctor,demo,start,stop}`.
 
+### Windows
+
+`make` and `scripts/setup.sh` need a Unix shell, so on Windows run the steps
+directly in PowerShell from the repo folder:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+copy .env.example .env          # then: notepad .env
+.venv\Scripts\python -m mlxphone.session doctor
+.venv\Scripts\python -m mlxphone.session demo --dry-run --phone demo-phone
+.venv\Scripts\python -m mlxphone.session demo
+.venv\Scripts\python tests\test_hardening.py
+```
+
+Install [platform-tools](https://developer.android.com/tools/releases/platform-tools),
+unzip it anywhere, and either add that folder to your `PATH` or set
+`MLX_ADB_BIN=C:\path\to\platform-tools\adb.exe` in `.env`. When your agent
+follows `AGENTS.md`, tell it to use `.venv\Scripts\python` instead of `python`.
+
 ## How an agent uses it
 
 Point your agent at [`AGENTS.md`](AGENTS.md). The flow it follows:
@@ -109,10 +129,18 @@ docs/api-responses.md  status codes & response shapes (no magic numbers)
 Run `make doctor` first — it names the specific failing check with a fix hint.
 Beyond that the tool self-diagnoses: a missing `adb` gives a per-OS install
 command; the wrong password form is auto-retried (plaintext → MD5) and logged; a
-`/mobile_profiles/limit` `501` on your tier is treated as "minutes unknown,
+`/mobile_profiles/limit` `501` (or `404 ENDPOINT_NOT_FOUND`) on your tier is treated as "minutes unknown,
 proceed" (always-stop + watchdog are the billing cap); and a start refused with
 capacity code `47002` backs off and reports the real reason instead of a bare
 timeout. Field/status shapes: [`docs/api-responses.md`](docs/api-responses.md).
+
+**`CERTIFICATE_VERIFY_FAILED` at sign-in** usually means antivirus HTTPS scanning
+(e.g. Avast/AVG Web Shield, Kaspersky, ESET) or a corporate proxy is re-signing
+traffic with its own certificate, which Python doesn't trust. Either exclude
+`api.multilogin.com` from HTTPS scanning, or export the scanner's root
+certificate, append it to a copy of `certifi`'s bundle
+(`python -m certifi` prints its path), and point `REQUESTS_CA_BUNDLE` at that
+file. Don't disable TLS verification.
 
 ## Security & privacy
 

@@ -155,7 +155,8 @@ class MlxClient:
         """Remaining mobile minutes, or ``None`` when the metric is unavailable.
 
         The ``/mobile_profiles/limit`` endpoint is not implemented on every
-        account tier (it can return HTTP 501 / an HTML page). In that case we
+        account tier (it can return HTTP 501, an HTML page, or a JSON 404 with
+        ``error_code: ENDPOINT_NOT_FOUND``). In that case we
         return ``None`` ("unknown") so the caller proceeds — the always-stop
         guarantee + watchdog are the real billing cap. Any *other* error still
         propagates. Returns 0/positive when the metric is actually known.

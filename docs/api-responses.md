@@ -76,7 +76,8 @@ timeout:
 `metric_code, current_used_value, metric_limit, remaining_limit`).
 
 This endpoint is **not implemented on every account tier** — it can return
-HTTP `501` / a non-JSON HTML page. In that case `remaining_minutes()` returns
+HTTP `501`, a non-JSON HTML page, or a JSON `404` whose `error_code` is
+`ENDPOINT_NOT_FOUND`. In that case `remaining_minutes()` returns
 `None` ("unknown") and the run proceeds, with the always-stop guarantee + the
 `--max-minutes` watchdog acting as the billing cap. The run only hard-stops when
 minutes are *known* and `<= 0`.
@@ -84,7 +85,8 @@ minutes are *known* and `<= 0`.
 ## Errors
 
 `MlxHTTPError` (subclass of `MlxError`) carries `status_code`, `path`, `body`,
-and two derived flags used across the harness:
+an `error_code` accessor, and two derived flags used across the harness:
 
-- `endpoint_unavailable` — HTTP 501 or a non-JSON body on a known route.
+- `endpoint_unavailable` — HTTP 501, a non-JSON body on a known route, or a 404
+  with `error_code: ENDPOINT_NOT_FOUND` (any other 404 still raises).
 - `credentials_rejected` — HTTP 400 or 401 (drives the plaintext→MD5 sign-in retry).

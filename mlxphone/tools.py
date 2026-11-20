@@ -5,25 +5,38 @@
     python -m mlxphone.tools find      <keyword>
     python -m mlxphone.tools tap       <x> <y>
     python -m mlxphone.tools text      "<string>"
+    python -m mlxphone.tools launch    <package>
     python -m mlxphone.tools shell     <args...>
 
 The connected device (serial + transient glogin code) is read from
 ``.mlxphone/device.json``, written by ``session start``. glogin is refreshed
 before every action (the session expires in ~30-60s).
+
+``screenshot`` streams the image first and, if that times out or returns
+something that is not a PNG, falls back to saving it on the phone and copying
+it with ``adb pull`` (more reliable on busy screens / slow links).
 """
 from __future__ import annotations
 
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from . import state
 from .adb import AdbDevice
 from .errors import MlxError
 
 _FIELD_RE = re.compile(r'(text|content-desc|resource-id|bounds)="([^"]*)"')
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
+_REMOTE_SHOT = "/sdcard/mlxphone_screen.png"
+
+# Overridable in tests.
+STREAM_TIMEOUT = 30
+PULL_TIMEOUT = 60
 
 
 def _device() -> AdbDevice:
@@ -35,12 +48,53 @@ def _device() -> AdbDevice:
     return AdbDevice(saved["serial"], saved.get("pwd", ""), saved.get("adb_bin", "adb"))
 
 
+def _screencap_stream(dev: AdbDevice) -> Optional[bytes]:
+    """Fast path: stream the PNG over ``exec-out``. None on timeout / bad data."""
+    dev.glogin()
+    try:
+        data = subprocess.run(
+            [dev.adb_bin, "-s", dev.serial, "exec-out", "screencap", "-p"],
+            capture_output=True,
+            timeout=STREAM_TIMEOUT,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        return None
+    return data if data.startswith(_PNG_MAGIC) else None
+
+
+def _screencap_pull(dev: AdbDevice) -> bytes:
+    """Fallback: save the PNG on the phone, ``adb pull`` it, delete the copy."""
+    try:
+        dev.shell("screencap", "-p", _REMOTE_SHOT, timeout=PULL_TIMEOUT)
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "screen.png"
+            res = subprocess.run(
+                [dev.adb_bin, "-s", dev.serial, "pull", _REMOTE_SHOT, str(local)],
+                capture_output=True,
+                text=True,
+                timeout=PULL_TIMEOUT,
+            )
+            if res.returncode != 0 or not local.exists():
+                raise MlxError(f"adb pull failed: {(res.stderr or res.stdout).strip()}")
+            data = local.read_bytes()
+    except subprocess.TimeoutExpired as exc:
+        raise MlxError(f"screenshot timed out ({exc.timeout}s) on both methods") from exc
+    finally:
+        try:
+            dev.shell("rm", "-f", _REMOTE_SHOT, timeout=15)
+        except Exception:  # noqa: BLE001 - cleanup is best-effort
+            pass
+    if not data.startswith(_PNG_MAGIC):
+        raise MlxError("screenshot fallback did not return a PNG image")
+    return data
+
+
 def _screencap(dev: AdbDevice) -> bytes:
-    return subprocess.run(
-        [dev.adb_bin, "-s", dev.serial, "exec-out", "screencap", "-p"],
-        capture_output=True,
-        timeout=60,
-    ).stdout
+    data = _screencap_stream(dev)
+    if data is not None:
+        return data
+    print("[screenshot] streaming failed; falling back to save-and-pull", file=sys.stderr)
+    return _screencap_pull(dev)
 
 
 def _dump_xml(dev: AdbDevice) -> str:
@@ -88,6 +142,33 @@ def cmd_text(dev: AdbDevice, args: list[str]) -> None:
     print("typed")
 
 
+def cmd_launch(dev: AdbDevice, args: list[str]) -> None:
+    """Open an app's main screen by package name.
+
+    Resolves the launcher activity and starts it with ``am start -n`` (what
+    works reliably on cloud phones); falls back to ``monkey`` if resolving fails.
+    """
+    if len(args) != 1 or not _PACKAGE_RE.match(args[0]):
+        raise MlxError("usage: launch <package>   e.g. launch com.instagram.android")
+    pkg = args[0]
+    res = dev.shell("cmd", "package", "resolve-activity", "--brief",
+                    "-c", "android.intent.category.LAUNCHER", pkg)
+    component = next(
+        (ln.strip() for ln in reversed(res.stdout.splitlines()) if "/" in ln), None
+    )
+    if component:
+        out = dev.shell("am", "start", "-n", component)
+        text = out.stdout + out.stderr
+        if "Error" not in text and "does not exist" not in text:
+            print(f"launched {component}")
+            return
+    out = dev.shell("monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
+    text = out.stdout + out.stderr
+    if "No activities found" in text or "aborted" in text.lower():
+        raise MlxError(f"could not launch {pkg} — is it installed? ({text.strip()[:200]})")
+    print(f"launched {pkg}")
+
+
 def cmd_shell(dev: AdbDevice, args: list[str]) -> None:
     res = dev.shell(*args)
     sys.stdout.write(res.stdout)
@@ -100,6 +181,7 @@ COMMANDS: dict[str, Callable[[AdbDevice, list[str]], None]] = {
     "find": cmd_find,
     "tap": cmd_tap,
     "text": cmd_text,
+    "launch": cmd_launch,
     "shell": cmd_shell,
 }
 

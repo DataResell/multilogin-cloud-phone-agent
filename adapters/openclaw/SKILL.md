@@ -28,6 +28,7 @@ python -m mlxphone.tools screenshot results/s.png   # look
 python -m mlxphone.tools find <keyword>             # exact bounds
 python -m mlxphone.tools tap <x> <y>                # act
 python -m mlxphone.tools text "..."                 # type
+python -m mlxphone.tools launch <package>           # open an app
 ```
 Look → find → act → verify. glogin is refreshed automatically before each action.
 
